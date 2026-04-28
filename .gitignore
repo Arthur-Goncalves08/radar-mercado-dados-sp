@@ -1,0 +1,15 @@
+# Ignorar cache do Python
+__pycache__/
+*.pyc
+
+# Ignorar ambientes virtuais
+venv/
+.env
+
+# Ignorar pastas nativas do Airflow (que serão criadas pelo Docker depois)
+logs/
+plugins/
+
+# Ignorar arquivos do sistema operacional
+Thumbs.db
+.DS_Store

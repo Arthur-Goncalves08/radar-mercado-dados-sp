@@ -1,0 +1,14 @@
+# Bibliotecas para extração de dados (Web Scraping / APIs)
+requests==2.31.0
+beautifulsoup4==4.12.3
+
+# Manipulação de Dados
+pandas==2.2.0
+
+# Conexão com Banco de Dados PostgreSQL
+psycopg-binary
+SQLAlchemy==2.0.25
+
+# Variáveis de ambiente locais (Senhas e Tokens)
+python-dotenv==1.0.1
+

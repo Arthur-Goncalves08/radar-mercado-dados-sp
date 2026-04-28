@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # 1. Nossa Landing Zone (Banco de Dados Relacional)
+  postgres_landing:
+    image: postgres:15
+    container_name: postgres_landing_zone
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin_password
+      POSTGRES_DB: radar_sp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - rede_dados
+
+  # 2. Orquestrador (Apache Airflow)
+  airflow:
+    image: apache/airflow:2.8.1
+    container_name: airflow_orquestrador
+    environment:
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False # Desativa DAGs de exemplo para limpar a interface
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+    command: standalone
+    networks:
+      - rede_dados
+    depends_on:
+      - postgres_landing
+
+# Declaração dos volumes e redes que usamos acima
+volumes:
+  postgres_data:
+
+networks:
+  rede_dados:
+    driver: bridge

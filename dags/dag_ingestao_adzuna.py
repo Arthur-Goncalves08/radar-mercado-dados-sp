@@ -5,14 +5,22 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from sqlalchemy import text
 import pandas as pd
 import requests
+import logging # <-- NOVA IMPORTAÇÃO
 from datetime import datetime
 
+# Configurando o Logger nativo do Airflow
+logger = logging.getLogger(__name__)
+
 def extrair_e_carregar_dados():
-    """Função que extrai da API e carrega no Postgres usando recursos nativos do Airflow."""
+    """Função que extrai da API e carrega no Postgres com tratamento de erros."""
     
-    # 1. Busca as credenciais no cofre do Airflow (TASK-8)
-    app_id = Variable.get("adzuna_app_id")
-    app_key = Variable.get("adzuna_app_key")
+    # 1. BUSCA DE CREDENCIAIS
+    try:
+        app_id = Variable.get("adzuna_app_id")
+        app_key = Variable.get("adzuna_app_key")
+    except Exception as e:
+        logger.error(f"Falha ao buscar credenciais no Airflow Variables: {e}")
+        raise # O raise repassa o erro para o Airflow falhar a Task
 
     url = "https://api.adzuna.com/v1/api/jobs/br/search/1"
     parametros = {
@@ -24,84 +32,90 @@ def extrair_e_carregar_dados():
         "content-type": "application/json"
     }
 
-    print("Iniciando extração da API da Adzuna...")
-    resposta = requests.get(url, params=parametros)
+    # 2. EXTRAÇÃO DA API COM TRATAMENTO DE REDE
+    logger.info("Iniciando extração da API da Adzuna...")
+    try:
+        # timeout=10 garante que o script não fique travado para sempre se a API estiver lenta
+        resposta = requests.get(url, params=parametros, timeout=10)
+        resposta.raise_for_status() # Dispara um erro automaticamente se o status não for 200 (OK)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Erro de conexão ou falha na API da Adzuna: {e}")
+        raise
 
-    if resposta.status_code == 200:
+    # 3. TRANSFORMAÇÃO E LIMPEZA
+    try:
         dados = resposta.json()
         vagas = dados.get('results', [])
         df = pd.json_normalize(vagas)
         
-        if not df.empty:
-            print(f"✅ {len(vagas)} vagas extraídas da API.")
-            
-            # --- MAPEAMENTO E LIMPEZA ---
-            df_mapeado = df.rename(columns={
-                'id': 'adzuna_id',
-                'title': 'titulo',
-                'company.display_name': 'empresa',
-                'location.display_name': 'localizacao',
-                'description': 'descricao',
-                'salary_min': 'salario_min',
-                'salary_max': 'salario_max',
-                'redirect_url': 'url_vaga'
-            })
-            
-            colunas_oficiais = ['adzuna_id', 'titulo', 'empresa', 'localizacao', 'descricao', 'salario_min', 'salario_max', 'url_vaga']
-            for col in colunas_oficiais:
-                if col not in df_mapeado.columns:
-                    df_mapeado[col] = None
-                    
-            df_final = df_mapeado[colunas_oficiais].copy()
-            
-            # Tipagem rigorosa para o Postgres
-            df_final['salario_min'] = pd.to_numeric(df_final['salario_min'], errors='coerce')
-            df_final['salario_max'] = pd.to_numeric(df_final['salario_max'], errors='coerce')
-            df_final['adzuna_id'] = df_final['adzuna_id'].astype(str)
-            
-            # 2. Conecta no banco usando a Connection do Airflow (TASK-8)
-            print("Conectando ao PostgreSQL via Airflow Connection...")
-            hook = PostgresHook(postgres_conn_id='postgres_landing_zone_conn')
-            engine = hook.get_sqlalchemy_engine()
-            
-            # 3. Carga de Dados Inteligente (Staging + ON CONFLICT)
-            print("Enviando dados para tabela temporária (Staging)...")
-            df_final.to_sql('stg_vagas_temp', con=engine, if_exists='replace', index=False)
-            
-            print("Movendo vagas novas para a Landing Zone e ignorando duplicatas...")
-            query_upsert = """
-                INSERT INTO bronze_vagas (adzuna_id, titulo, empresa, localizacao, descricao, salario_min, salario_max, url_vaga)
-                SELECT adzuna_id, titulo, empresa, localizacao, descricao, salario_min, salario_max, url_vaga
-                FROM stg_vagas_temp
-                ON CONFLICT (adzuna_id) DO NOTHING;
-            """
-            
-            # Executa o comando SQL seguro
-            with engine.begin() as conn:
-                conn.execute(text(query_upsert))
+        if df.empty:
+            logger.warning("A API retornou sucesso, mas nenhuma vaga foi encontrada com esses filtros.")
+            return # Encerra a função pacificamente, não é um erro crítico.
+
+        logger.info(f"Sucesso: {len(vagas)} vagas extraídas da API.")
+        
+        df_mapeado = df.rename(columns={
+            'id': 'adzuna_id', 'title': 'titulo', 'company.display_name': 'empresa',
+            'location.display_name': 'localizacao', 'description': 'descricao',
+            'salary_min': 'salario_min', 'salary_max': 'salario_max', 'redirect_url': 'url_vaga'
+        })
+        
+        colunas_oficiais = ['adzuna_id', 'titulo', 'empresa', 'localizacao', 'descricao', 'salario_min', 'salario_max', 'url_vaga']
+        for col in colunas_oficiais:
+            if col not in df_mapeado.columns:
+                df_mapeado[col] = None
                 
-            print("✅ Processo finalizado! Vagas novas adicionadas com sucesso.")
+        df_final = df_mapeado[colunas_oficiais].copy()
+        df_final['salario_min'] = pd.to_numeric(df_final['salario_min'], errors='coerce')
+        df_final['salario_max'] = pd.to_numeric(df_final['salario_max'], errors='coerce')
+        df_final['adzuna_id'] = df_final['adzuna_id'].astype(str)
+        
+    except Exception as e:
+        logger.error(f"Erro durante a transformação dos dados (Pandas): {e}")
+        raise
+
+    # 4. CARGA NO BANCO DE DADOS (COM TRATAMENTO DE TRANSAÇÃO)
+    try:
+        logger.info("Conectando ao PostgreSQL via Airflow Connection...")
+        hook = PostgresHook(postgres_conn_id='postgres_landing_zone_conn')
+        engine = hook.get_sqlalchemy_engine()
+        
+        logger.info("Enviando dados para tabela temporária (Staging)...")
+        df_final.to_sql('stg_vagas_temp', con=engine, if_exists='replace', index=False)
+        
+        logger.info("Movendo vagas novas para a Landing Zone (Upsert)...")
+        query_upsert = """
+            INSERT INTO bronze_vagas (adzuna_id, titulo, empresa, localizacao, descricao, salario_min, salario_max, url_vaga)
+            SELECT adzuna_id, titulo, empresa, localizacao, descricao, salario_min, salario_max, url_vaga
+            FROM stg_vagas_temp
+            ON CONFLICT (adzuna_id) DO NOTHING;
+        """
+        
+        with engine.begin() as conn:
+            conn.execute(text(query_upsert))
             
-    else:
-        raise Exception(f"Falha na API Adzuna. Status Code: {resposta.status_code}")
-            
+        logger.info("Processo finalizado! Transação com o banco de dados concluída.")
+
+    except Exception as e:
+        logger.error(f"Erro de Banco de Dados: Falha ao tentar salvar na Landing Zone: {e}")
+        raise
+
 
 # --- DEFINIÇÃO DA DAG ---
 argumentos_padrao = {
     'owner': 'arthur',
     'start_date': datetime(2024, 1, 1),
-    'retries': 1 # Se falhar, tenta de novo 1 vez
+    'retries': 2, # Aumentamos para 2 retentativas, ideal para oscilações de API
 }
 
 with DAG(
     dag_id='ingestao_adzuna_sp',
     default_args=argumentos_padrao,
-    schedule_interval='@daily', # Agendado para rodar uma vez por dia
-    catchup=False,              # Evita que ele tente rodar dias passados de uma vez
+    schedule_interval='@daily',
+    catchup=False,
     tags=['ingest', 'bronze']
 ) as dag:
 
-    # Criação da Tarefa
     tarefa_extracao = PythonOperator(
         task_id='extrair_api_e_carregar_bd',
         python_callable=extrair_e_carregar_dados

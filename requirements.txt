@@ -4,10 +4,11 @@ beautifulsoup4==4.12.3
 
 # Manipulação de Dados
 pandas==2.2.0
-
+pyarrow
 # Conexão com Banco de Dados PostgreSQL
+psycopg
 psycopg-binary
-SQLAlchemy==2.0.25
+SQLAlchemy
 
 # Variáveis de ambiente locais (Senhas e Tokens)
 python-dotenv==1.0.1

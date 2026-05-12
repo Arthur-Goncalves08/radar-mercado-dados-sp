@@ -33,10 +33,35 @@ services:
     depends_on:
       - postgres_landing
 
+  #3.Objeto de armazenamento (minIO/S3)
+  minio-datalake:
+    image: minio/minio
+    container_name: minio-datalake
+    ports:
+      - "9000:9000" # Porta da API (S3)
+      - "9001:9001" # Porta da Interface Web (Console)
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=admin1234
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+  #.Objeto de Procesamento de dados
+  pyspark_workspace:
+    image: jupyter/pyspark-notebook:spark-3.4.1
+    container_name: pyspark_workspace
+    ports:
+      - "8888:8888" # Interface do Jupyter Lab
+      - "4040:4040" # Spark UI (para monitorar o processamento de dados)
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    volumes:
+      - ./notebooks:/home/jovyan/work
+
 # Declaração dos volumes e redes que usamos acima
 volumes:
   postgres_data:
-
+  minio_data:
 networks:
   rede_dados:
     driver: bridge

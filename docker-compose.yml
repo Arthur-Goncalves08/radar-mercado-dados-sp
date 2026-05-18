@@ -34,7 +34,7 @@ services:
       - postgres_landing
 
   #3.Objeto de armazenamento (minIO/S3)
-  minio-datalake:
+  mi nio-datalake:
     image: minio/minio
     container_name: minio-datalake
     ports:

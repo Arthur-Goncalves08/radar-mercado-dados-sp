@@ -117,7 +117,7 @@ def exportar_para_datalake():
         
         # Conectando ao MinIO local como se fosse a AWS
         s3 = boto3.client('s3',
-                          endpoint_url='http://minio-datalake:9000', # Nome do container na rede
+                          endpoint_url='http://host.docker.internal:9000', # Nome do container na rede
                           aws_access_key_id='admin',
                           aws_secret_access_key='admin1234',
                           config=Config(signature_version='s3v4'),

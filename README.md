@@ -8,6 +8,8 @@ O projeto adota a **Arquitetura Medalhão** (Bronze, Silver, Gold) e utiliza as 
 ---
 
 ## 🚀 Arquitetura e Fluxo de Dados
+[API Adzuna] ➔ [PostgreSQL (Landing)] ➔ [MinIO (Bronze)] ➔ [PySpark (Silver/Gold)] ➔ [Tableau/Dashboard]
+
 * **Extração (API):** Consumo da API pública da Adzuna buscando vagas ativas no estado de SP.
 * **Landing Zone (Load):** Armazenamento temporário e seguro dos dados brutos no PostgreSQL com tratamento de duplicatas (`Upsert / ON CONFLICT`).
 * **Camada Bronze (Data Lake):** Exportação automatizada dos dados da Landing Zone para um repositório de objetos local (MinIO), simulando a nuvem da AWS (S3).
